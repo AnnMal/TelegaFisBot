@@ -43,9 +43,17 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 def extract_members(text: str) -> set:
     """Извлекает user_id или @username из текста."""
-    user_ids = set(re.findall(r"\b\d{5,}\b", text))  # ID от 5 цифр
-    usernames = set(re.findall(r"@(\w+)", text.lower()))
-    return user_ids.union(usernames)
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    members = set()
+    for line in lines:
+        # Ищем ID (только цифры длиной 5+)
+        if re.fullmatch(r'\d{5,}', line):
+            members.add(line)
+        # Ищем юзернеймы (начинается с @)
+        elif line.startswith('@'):
+            members.add(line[1:].lower())  # Убираем @ и приводим к lowercase
+    return members
 
 async def check_members(update: Update, context: CallbackContext) -> None:
     """Проверяет список и удаляет лишних из основного чата."""
