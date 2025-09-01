@@ -25,6 +25,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def debug_handler(update: Update, context: CallbackContext):
+    logger.info(f"Получено сообщение в чате {update.effective_chat.id}: {update.effective_message.text}")
+
 async def post_init(application: Application) -> None:
     """Выполняется после инициализации бота."""
     await application.bot.send_message(
@@ -85,6 +88,8 @@ async def check_members(update: Update, context: CallbackContext) -> None:
     except Exception as e:
         logger.error(f"Ошибка: {str(e)}")
 
+
+
 def main() -> None:
     """Запуск бота."""
     application = Application.builder() \
@@ -103,6 +108,9 @@ def main() -> None:
             check_members
         )
     )
+
+    # В main() добавьте перед run_polling():
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, debug_handler), group=-1)
 
     logger.info("🟢🟢🟢 Запускаю бота...")
     application.run_polling()
