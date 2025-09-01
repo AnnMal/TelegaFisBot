@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 # Настройки бота
-TOKEN = "ВАШ_ТОКЕН"  # Замените на реальный токен
+TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # Замените на реальный токен
 MAIN_CHAT_ID = -123456789  # ID основного чата (откуда удалять)
 LIST_CHAT_ID = -987654321  # ID чата со списком (где мониторим)
 
