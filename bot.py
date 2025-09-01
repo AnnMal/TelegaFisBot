@@ -55,10 +55,21 @@ def extract_members(text: str) -> set:
             members.add(line[1:].lower())  # Убираем @ и приводим к lowercase
     return members
 
-async def check_members(update: Update, context: CallbackContext) -> None:
-    """Проверяет список и удаляет лишних из основного чата."""
-    if update.effective_chat.id != LIST_CHAT_ID:
+
+async def check_members(update: Update, context: CallbackContext):
+    # Проверяем права бота
+    bot_member = await context.bot.get_chat_member(
+        chat_id=MAIN_CHAT_ID,
+        user_id=context.bot.id
+    )
+    if not bot_member.can_restrict_members:
+        await update.message.reply_text("⚠️ У меня нет прав на удаление участников!")
         return
+
+#async def check_members(update: Update, context: CallbackContext) -> None:
+#    """Проверяет список и удаляет лишних из основного чата."""
+#    if update.effective_chat.id != LIST_CHAT_ID:
+#        return
 
     try:
         new_members = extract_members(update.effective_message.text)
