@@ -47,18 +47,58 @@ async def help_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(help_text, parse_mode='HTML')
 
 def extract_members(text: str) -> set:
-    """Извлекает user_id и @username из текста"""
+    """Извлекает user_id и @username из текста с подробным логированием"""
+    logger.info(f"Начало обработки текста:\n{text}")
+    
     members = set()
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    if not lines:
+        logger.warning("Получен пустой текст для обработки")
+        return members
 
-    logger.info(f"Извлекаем user_id и @username из текста")
+    logger.info(f"Обнаружено строк: {len(lines)}")
     
     # Пропускаем строку с заголовком
-    for line in lines[1:]:
-        if line.startswith('@'):
-            members.add(line[1:].lower())
-        elif re.fullmatch(r'\d{5,}', line):
-            members.add(line)
+    if len(lines) > 1:
+        logger.debug(f"Пропускаем заголовок: '{lines[0]}'")
+    
+    processed_count = 0
+    invalid_count = 0
+    
+    for line in lines[1:]:  # Пропускаем первую строку (заголовок)
+        try:
+            logger.debug(f"Обработка строки: '{line}'")
+            
+            if line.startswith('@'):
+                username = line[1:].lower()
+                if re.fullmatch(r'[a-z0-9_]{5,32}', username):
+                    members.add(username)
+                    logger.debug(f"Добавлен username: {username}")
+                    processed_count += 1
+                else:
+                    logger.warning(f"Некорректный username: {line}")
+                    invalid_count += 1
+                    
+            elif re.fullmatch(r'\d{5,}', line):
+                members.add(line)
+                logger.debug(f"Добавлен user_id: {line}")
+                processed_count += 1
+            else:
+                logger.warning(f"Неопознанный формат: '{line}'")
+                invalid_count += 1
+                
+        except Exception as e:
+            logger.error(f"Ошибка обработки строки '{line}': {str(e)}")
+            invalid_count += 1
+
+    logger.info(
+        f"Результат обработки: "
+        f"успешно {processed_count}, "
+        f"ошибок {invalid_count}, "
+        f"всего идентификаторов: {len(members)}"
+    )
+    logger.debug(f"Полученный набор: {members}")
     
     return members
 
