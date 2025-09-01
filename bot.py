@@ -50,6 +50,8 @@ def extract_members(text: str) -> set:
     """Извлекает user_id и @username из текста"""
     members = set()
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+
+    logger.info(f"Извлекаем user_id и @username из текста")
     
     # Пропускаем строку с заголовком
     for line in lines[1:]:
