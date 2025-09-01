@@ -1,14 +1,8 @@
-# Было (для версий 13.x):
-#from telegram.ext import Filters
-
-# Стало (для версий 20.x+):
-#from telegram.ext import filters
-
 import logging
 import re
-from telegram import Update, ChatPermissions
+from telegram import Update
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     MessageHandler,
     filters,
@@ -16,7 +10,7 @@ from telegram.ext import (
 )
 
 # Настройки бота
-TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # Замените на реальный токен
+TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"
 MAIN_CHAT_ID = -4884863804  # ID основного чата (откуда удалять)
 LIST_CHAT_ID = -4960077583  # ID чата со списком (где мониторим)
 
@@ -27,44 +21,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: CallbackContext) -> None:
     """Обработчик команды /start."""
-    update.message.reply_text("🤖 Бот запущен! Ожидаю обновлений списка...")
+    await update.message.reply_text("🤖 Бот запущен! Ожидаю обновлений списка...")
 
 def extract_members(text: str) -> set:
     """Извлекает user_id или @username из текста."""
-    # Ищем ID (цифры) и юзернеймы (@example)
     user_ids = set(re.findall(r"\b\d{5,}\b", text))  # ID обычно от 5 цифр
     usernames = set(re.findall(r"@(\w+)", text.lower()))
     return user_ids.union(usernames)
 
-def check_members(update: Update, context: CallbackContext) -> None:
+async def check_members(update: Update, context: CallbackContext) -> None:
     """Проверяет список и удаляет лишних из основного чата."""
     if update.effective_chat.id != LIST_CHAT_ID:
-        return  # Игнорируем другие чаты
+        return
 
     try:
-        # Получаем текущий список из сообщения
         new_members = extract_members(update.effective_message.text)
         if not new_members:
             raise ValueError("Не найден список пользователей.")
 
-        # Получаем участников основного чата
-        chat_members = context.bot.get_chat_administrators(MAIN_CHAT_ID)
+        chat = await context.bot.get_chat(MAIN_CHAT_ID)
+        chat_members = await chat.get_administrators()
+        
         current_members = {
             str(member.user.id) for member in chat_members
         }.union(
             {member.user.username.lower() for member in chat_members if member.user.username}
         )
 
-        # Удаляем тех, кого нет в новом списке
         for member in chat_members:
             user_id = str(member.user.id)
             username = member.user.username.lower() if member.user.username else None
-
+            
             if (user_id not in new_members) and (username not in new_members):
                 try:
-                    context.bot.ban_chat_member(MAIN_CHAT_ID, member.user.id)
+                    await context.bot.ban_chat_member(
+                        chat_id=MAIN_CHAT_ID,
+                        user_id=member.user.id
+                    )
                     logger.info(f"❌ Удален: {username or user_id}")
                 except Exception as e:
                     logger.error(f"Ошибка удаления {username or user_id}: {e}")
@@ -74,25 +69,23 @@ def check_members(update: Update, context: CallbackContext) -> None:
 
 def main() -> None:
     """Запуск бота."""
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
+    application = Application.builder().token(TOKEN).build()
 
     # Обработчики команд
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", start))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", start))
 
     # Обработчик сообщений в чате со списком
-    dispatcher.add_handler(
+    application.add_handler(
         MessageHandler(
-            Filters.chat(LIST_CHAT_ID) & Filters.text,
+            filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT,
             check_members
         )
     )
 
-    # Запуск бота в режиме polling
-    updater.start_polling()
+    # Запуск бота
+    application.run_polling()
     logger.info("🟢 Бот запущен и слушает обновления...")
-    updater.idle()
 
 if __name__ == "__main__":
     main()
