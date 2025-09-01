@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 # NEW: Глобальная переменная для отслеживания состояния
 LAST_PROCESSED_MESSAGE = None
 
+async def test_parse(update: Update, context: CallbackContext):
+    test_text = """Актуальные участники:
+@A2nn3Ma3l
+333352583954"""
+    
+    members = extract_members(test_text)
+    await update.message.reply_text(f"Результат парсинга:\n{members}")
+
 async def log_all_updates(update: Update, context: CallbackContext):  # NEW
     """Логирует все входящие обновления"""
     logger.debug(f"Получено обновление: {update.to_dict()}")
