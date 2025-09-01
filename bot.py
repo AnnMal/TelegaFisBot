@@ -14,10 +14,10 @@ TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # Замените н�
 MAIN_CHAT_ID = -4884863804  # ID основного чата (откуда удалять)
 LIST_CHAT_ID = -1002900105796  # ID чата со списком (где мониторим)
 
-# Настройка логов
+# Инициализация логов (ДВОЙНАЯ ПРОВЕРКА)
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler("bot.log", encoding='utf-8'),
         logging.StreamHandler()
@@ -25,149 +25,127 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def debug_handler(update: Update, context: CallbackContext):
-    logger.info(f"Получено сообщение в чате {update.effective_chat.id}: {update.effective_message.text}")
-
-async def post_init(application: Application) -> None:
-    """Выполняется после инициализации бота."""
-    await application.bot.send_message(
-        chat_id=LIST_CHAT_ID,
-        text="🔔 Бот начал мониторинг этого чата!\n"
-             "Отправьте список в формате:\n"
-             "Актуальные участники:\n"
-             "@username1\n"
-             "123456789"
-    )
-    logger.info("Инициализация завершена, уведомление отправлено")
-
-async def start(update: Update, context: CallbackContext) -> None:
-    """Обработчик команды /start."""
-    await update.message.reply_text("🤖 Бот запущен! Используйте /help")
-    logger.info(f"Получена команда /start от {update.effective_user.id}")
-
-async def help_command(update: Update, context: CallbackContext) -> None:
-    """Обработчик команды /help."""
-    help_text = (
-        "📌 <b>Доступные команды:</b>\n\n"
-        "/start - Перезапуск бота\n"
-        "/help - Справка\n"
-        "/logs - Показать логи\n\n"
-        f"Мониторинг чата: <code>{LIST_CHAT_ID}</code>"
-    )
-    await update.message.reply_text(help_text, parse_mode='HTML')
-
-def extract_members(text: str) -> set:
-    """Извлекает user_id или @username из текста."""
-    user_ids = set(re.findall(r'(?<!\d)\d{5,}(?!\d)', text))
-    usernames = set(re.findall(r'@([a-zA-Z0-9_]{5,32})\b', text))
-    return user_ids.union(usernames)
-
-async def check_members(update: Update, context: CallbackContext) -> None:
-    """Проверяет список и удаляет лишних."""
+# 1. Проверка: Функция post_init (часто отсутствует)
+async def post_init(app: Application):
+    """Отправляет уведомление о старте"""
     try:
-        logger.info(f"Проверяю сообщение в чате {update.effective_chat.id}")
-        
-        # Проверяем, что сообщение из нужного чата
-        if update.effective_chat.id != LIST_CHAT_ID:
-            logger.warning(f"Игнорирую сообщение из чата {update.effective_chat.id} (ожидал {LIST_CHAT_ID})")
-            return
-
-        # Логируем сырые данные
-        raw_text = update.effective_message.text
-        logger.info(f"Исходный текст:\n{raw_text}")
-        
-        # Извлекаем участников
-        new_members = extract_members(raw_text)
-        logger.info(f"Извлеченные участники: {new_members}")
-        
-        if not new_members:
-            error_msg = "⚠️ Не найден список пользователей. Ожидаю формат:\nАктуальные участники:\n@username1\n123456789"
-            await update.message.reply_text(error_msg)
-            return
-
-        # Получаем текущих участников
-        chat = await context.bot.get_chat(MAIN_CHAT_ID)
-        try:
-            admins = await chat.get_administrators()
-            logger.info(f"Найдено {len(admins)} администраторов")
-        except Exception as e:
-            logger.error(f"Ошибка получения списка админов: {e}")
-            await update.message.reply_text(f"❌ Ошибка доступа к чату {MAIN_CHAT_ID}")
-            return
-
-        current_members = {
-            str(member.user.id) for member in admins
-        }.union(
-            {member.user.username.lower() for member in admins if member.user.username}
+        await app.bot.send_message(
+            chat_id=LIST_CHAT_ID,
+            text="🔄 Бот запущен и готов к работе!"
         )
-        logger.info(f"Текущие участники: {current_members}")
+        logger.info("Уведомление о старте отправлено")
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления: {e}")
 
-        # Поиск кого удалять
-        to_remove = [
-            member for member in admins
-            if (str(member.user.id) not in new_members) and 
-               (member.user.username and member.user.username.lower() not in new_members)
-        ]
+# 2. Проверка: Улучшенный парсинг участников
+def extract_members(text: str) -> set:
+    """Извлекает user_id и @username с валидацией"""
+    members = set()
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    for line in lines:
+        # Пропускаем заголовок
+        if "актуальные участники" in line.lower():
+            continue
+            
+        # Ищем ID (только цифры)
+        if re.fullmatch(r'\d{5,}', line):
+            members.add(line)
+        # Ищем юзернеймы
+        elif line.startswith('@'):
+            username = line[1:].lower()
+            if re.fullmatch(r'[a-z0-9_]{5,32}', username):
+                members.add(username)
+    
+    logger.info(f"Извлечены участники: {members}")
+    return members
 
-        if not to_remove:
-            logger.info("Нет пользователей для удаления")
-            await update.message.reply_text("✅ Все пользователи в списке актуальны")
+# 3. Проверка: Обработчик сообщений с защитой от ошибок
+async def check_members(update: Update, context: CallbackContext):
+    """Основная логика проверки списка"""
+    try:
+        # Верификация чата
+        if update.effective_chat.id != LIST_CHAT_ID:
+            logger.warning(f"Игнорирую сообщение из чата {update.effective_chat.id}")
             return
 
-        # Процесс удаления
-        success = []
-        failed = []
+        # Парсинг списка
+        new_members = extract_members(update.message.text)
+        if not new_members:
+            await update.message.reply_text("❌ Не найден валидный список участников")
+            return
+
+        # Проверка прав бота
+        bot_member = await context.bot.get_chat_member(MAIN_CHAT_ID, context.bot.id)
+        if not bot_member.can_restrict_members:
+            await update.message.reply_text("⚠️ У меня нет прав на удаление!")
+            return
+
+        # Получение текущих участников
+        admins = await context.bot.get_chat_administrators(MAIN_CHAT_ID)
+        to_remove = []
         
+        for member in admins:
+            user_identifiers = {
+                str(member.user.id),
+                member.user.username.lower() if member.user.username else None
+            }
+            
+            # Поиск отсутствующих в списке
+            if not user_identifiers & new_members and member.status != "creator":
+                to_remove.append(member)
+
+        # Удаление участников
         for member in to_remove:
             try:
-                if member.status != 'creator':
-                    await context.bot.ban_chat_member(MAIN_CHAT_ID, member.user.id)
-                    username = member.user.username or member.user.id
-                    success.append(username)
-                    logger.info(f"Успешно удален: {username}")
+                await context.bot.ban_chat_member(
+                    chat_id=MAIN_CHAT_ID,
+                    user_id=member.user.id,
+                    until_date=int(datetime.now().timestamp()) + 60  # Бан на 1 минуту
+                )
+                logger.info(f"Удален: {member.user.username or member.user.id}")
             except Exception as e:
-                failed.append(str(member.user.id))
-                logger.error(f"Ошибка удаления {member.user.id}: {e}")
+                logger.error(f"Ошибка удаления: {e}")
 
-        # Отчет о выполнении
-        report = []
-        if success:
-            report.append(f"✅ Удалено: {', '.join(map(str, success))}")
-        if failed:
-            report.append(f"❌ Не удалось удалить: {', '.join(failed)}")
-        
-        if report:
-            await update.message.reply_text("\n".join(report))
+        await update.message.reply_text(f"✅ Готово! Обработано {len(to_remove)} участников")
 
     except Exception as e:
-        logger.exception("Критическая ошибка в check_members:")
-        await update.message.reply_text(f"🚨 Произошла ошибка: {str(e)}")
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        await update.message.reply_text("⚠️ Произошла внутренняя ошибка")
 
+# 4. Проверка: Тестовая команда для диагностики
+async def test_command(update: Update, context: CallbackContext):
+    """Ручной запуск проверки"""
+    test_msg = """Актуальные участники:
+@test_user
+123456789"""
+    
+    fake_update = Update(
+        update_id=update.update_id + 1,
+        message=Message(
+            message_id=update.message.message_id + 1,
+            date=datetime.now(),
+            chat=Chat(id=LIST_CHAT_ID, type='supergroup'),
+            text=test_msg
+        )
+    )
+    await check_members(fake_update, context)
 
-
-def main() -> None:
-    """Запуск бота."""
+def main():
     application = Application.builder() \
         .token(TOKEN) \
         .post_init(post_init) \
         .build()
 
-    # Обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
+    # Регистрация обработчиков
+    application.add_handler(CommandHandler("test", test_command))  # Диагностика
+    application.add_handler(MessageHandler(
+        filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT,
+        check_members
+    ))
 
-    # Обработчик сообщений
-    application.add_handler(
-        MessageHandler(
-            filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT,
-            check_members
-        )
-    )
-
-    # В main() добавьте перед run_polling():
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, debug_handler), group=-1)
-
-    logger.info("🟢🟢🟢 Запускаю бота...")
+    # Запуск бота
+    logger.info("🤖 Бот запускается...")
     application.run_polling()
 
 if __name__ == "__main__":
