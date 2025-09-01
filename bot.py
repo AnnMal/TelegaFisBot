@@ -65,28 +65,83 @@ def extract_members(text: str) -> set:
 async def check_members(update: Update, context: CallbackContext) -> None:
     """Проверяет список и удаляет лишних."""
     try:
-        new_members = extract_members(update.effective_message.text)
-        if not new_members:
-            await update.message.reply_text("⚠️ Не найден список пользователей!")
+        logger.info(f"Проверяю сообщение в чате {update.effective_chat.id}")
+        
+        # Проверяем, что сообщение из нужного чата
+        if update.effective_chat.id != LIST_CHAT_ID:
+            logger.warning(f"Игнорирую сообщение из чата {update.effective_chat.id} (ожидал {LIST_CHAT_ID})")
             return
 
-        chat = await context.bot.get_chat(MAIN_CHAT_ID)
-        admins = await chat.get_administrators()
+        # Логируем сырые данные
+        raw_text = update.effective_message.text
+        logger.info(f"Исходный текст:\n{raw_text}")
         
-        for member in admins:
-            user_id = str(member.user.id)
-            username = (member.user.username or "").lower()
-            
-            if (user_id not in new_members) and (username not in new_members):
-                try:
-                    if member.status != 'creator':
-                        await context.bot.ban_chat_member(MAIN_CHAT_ID, member.user.id)
-                        logger.info(f"Удален: {username or user_id}")
-                except Exception as e:
-                    logger.error(f"Ошибка удаления: {e}")
+        # Извлекаем участников
+        new_members = extract_members(raw_text)
+        logger.info(f"Извлеченные участники: {new_members}")
+        
+        if not new_members:
+            error_msg = "⚠️ Не найден список пользователей. Ожидаю формат:\nАктуальные участники:\n@username1\n123456789"
+            await update.message.reply_text(error_msg)
+            return
+
+        # Получаем текущих участников
+        chat = await context.bot.get_chat(MAIN_CHAT_ID)
+        try:
+            admins = await chat.get_administrators()
+            logger.info(f"Найдено {len(admins)} администраторов")
+        except Exception as e:
+            logger.error(f"Ошибка получения списка админов: {e}")
+            await update.message.reply_text(f"❌ Ошибка доступа к чату {MAIN_CHAT_ID}")
+            return
+
+        current_members = {
+            str(member.user.id) for member in admins
+        }.union(
+            {member.user.username.lower() for member in admins if member.user.username}
+        )
+        logger.info(f"Текущие участники: {current_members}")
+
+        # Поиск кого удалять
+        to_remove = [
+            member for member in admins
+            if (str(member.user.id) not in new_members) and 
+               (member.user.username and member.user.username.lower() not in new_members)
+        ]
+
+        if not to_remove:
+            logger.info("Нет пользователей для удаления")
+            await update.message.reply_text("✅ Все пользователи в списке актуальны")
+            return
+
+        # Процесс удаления
+        success = []
+        failed = []
+        
+        for member in to_remove:
+            try:
+                if member.status != 'creator':
+                    await context.bot.ban_chat_member(MAIN_CHAT_ID, member.user.id)
+                    username = member.user.username or member.user.id
+                    success.append(username)
+                    logger.info(f"Успешно удален: {username}")
+            except Exception as e:
+                failed.append(str(member.user.id))
+                logger.error(f"Ошибка удаления {member.user.id}: {e}")
+
+        # Отчет о выполнении
+        report = []
+        if success:
+            report.append(f"✅ Удалено: {', '.join(map(str, success))}")
+        if failed:
+            report.append(f"❌ Не удалось удалить: {', '.join(failed)}")
+        
+        if report:
+            await update.message.reply_text("\n".join(report))
 
     except Exception as e:
-        logger.error(f"Ошибка: {str(e)}")
+        logger.exception("Критическая ошибка в check_members:")
+        await update.message.reply_text(f"🚨 Произошла ошибка: {str(e)}")
 
 
 
