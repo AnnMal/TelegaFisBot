@@ -11,8 +11,8 @@ from telegram.ext import (
 
 # Настройки бота
 TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # Замените на реальный токен
-MAIN_CHAT_ID = -123456789  # ID основного чата (откуда удалять)
-LIST_CHAT_ID = -987654321  # ID чата со списком (где мониторим)
+MAIN_CHAT_ID = -4884863804  # ID основного чата (откуда удалять)
+LIST_CHAT_ID = -1002900105796  # ID чата со списком (где мониторим)
 
 # Настройка логов
 logging.basicConfig(
