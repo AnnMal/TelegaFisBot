@@ -1,3 +1,9 @@
+# Было (для версий 13.x):
+#from telegram.ext import Filters
+
+# Стало (для версий 20.x+):
+#from telegram.ext import filters
+
 import logging
 import re
 from telegram import Update, ChatPermissions
@@ -5,7 +11,7 @@ from telegram.ext import (
     Updater,
     CommandHandler,
     MessageHandler,
-    Filters,
+    filters,
     CallbackContext,
 )
 
