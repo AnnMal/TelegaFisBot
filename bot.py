@@ -14,60 +14,89 @@ TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # Замените н�
 MAIN_CHAT_ID = -4884863804  # ID основного чата (откуда удалять)
 LIST_CHAT_ID = -1002900105796  # ID чата со списком (где мониторим)
 
-# Настройка логов (ДВОЙНОЕ ЛОГИРОВАНИЕ)
+# Настройка логов
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("bot.log", encoding='utf-8'),  # Запись в файл
-        logging.StreamHandler()  # Вывод в консоль
+        logging.FileHandler("bot.log", encoding='utf-8'),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Для удобного чтения логов в реальном времени
-def tail_logs():
-    """Генератор для чтения логов в реальном времени"""
-    with open('bot.log', 'r', encoding='utf-8') as log_file:
-        log_file.seek(0, 2)  # Перемещаемся в конец файла
-        while True:
-            line = log_file.readline()
-            if not line:
-                continue
-            yield line.strip()
-
-# NEW: Команда для чтения логов
-async def show_logs(update: Update, context: CallbackContext):
-    """Отправка последних 10 строк лога"""
-    try:
-        with open('bot.log', 'r', encoding='utf-8') as f:
-            lines = f.readlines()[-10:]
-            await update.message.reply_text(f"📋 Последние логи:\n```\n{''.join(lines)}\n```", 
-                                          parse_mode='Markdown')
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка чтения логов: {e}")
+async def post_init(application: Application) -> None:
+    """Выполняется после инициализации бота."""
+    await application.bot.send_message(
+        chat_id=LIST_CHAT_ID,
+        text="🔔 Бот начал мониторинг этого чата!\n"
+             "Отправьте список в формате:\n"
+             "Актуальные участники:\n"
+             "@username1\n"
+             "123456789"
+    )
+    logger.info("Инициализация завершена, уведомление отправлено")
 
 async def start(update: Update, context: CallbackContext) -> None:
     """Обработчик команды /start."""
-    await update.message.reply_text(
-        "🤖 Бот для управления чатом запущен!\n"
-        "Используйте /help для списка команд"
-    )
-    logger.info("Бот запущен через команду /start")  # Пример записи в лог
+    await update.message.reply_text("🤖 Бот запущен! Используйте /help")
+    logger.info(f"Получена команда /start от {update.effective_user.id}")
 
-# ... (остальные функции из предыдущего кода остаются без изменений) ...
+async def help_command(update: Update, context: CallbackContext) -> None:
+    """Обработчик команды /help."""
+    help_text = (
+        "📌 <b>Доступные команды:</b>\n\n"
+        "/start - Перезапуск бота\n"
+        "/help - Справка\n"
+        "/logs - Показать логи\n\n"
+        f"Мониторинг чата: <code>{LIST_CHAT_ID}</code>"
+    )
+    await update.message.reply_text(help_text, parse_mode='HTML')
+
+def extract_members(text: str) -> set:
+    """Извлекает user_id или @username из текста."""
+    user_ids = set(re.findall(r'(?<!\d)\d{5,}(?!\d)', text))
+    usernames = set(re.findall(r'@([a-zA-Z0-9_]{5,32})\b', text))
+    return user_ids.union(usernames)
+
+async def check_members(update: Update, context: CallbackContext) -> None:
+    """Проверяет список и удаляет лишних."""
+    try:
+        new_members = extract_members(update.effective_message.text)
+        if not new_members:
+            await update.message.reply_text("⚠️ Не найден список пользователей!")
+            return
+
+        chat = await context.bot.get_chat(MAIN_CHAT_ID)
+        admins = await chat.get_administrators()
+        
+        for member in admins:
+            user_id = str(member.user.id)
+            username = (member.user.username or "").lower()
+            
+            if (user_id not in new_members) and (username not in new_members):
+                try:
+                    if member.status != 'creator':
+                        await context.bot.ban_chat_member(MAIN_CHAT_ID, member.user.id)
+                        logger.info(f"Удален: {username or user_id}")
+                except Exception as e:
+                    logger.error(f"Ошибка удаления: {e}")
+
+    except Exception as e:
+        logger.error(f"Ошибка: {str(e)}")
 
 def main() -> None:
     """Запуск бота."""
-    application = Application.builder().token(TOKEN).post_init(post_init).build()
-    
+    application = Application.builder() \
+        .token(TOKEN) \
+        .post_init(post_init) \
+        .build()
+
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("check_reaction", check_reaction))
-    application.add_handler(CommandHandler("logs", show_logs))  # NEW
 
-    # Обработчик сообщений в чате со списком
+    # Обработчик сообщений
     application.add_handler(
         MessageHandler(
             filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT,
@@ -75,8 +104,7 @@ def main() -> None:
         )
     )
 
-    # Запуск бота
-    logger.info("🟢🟢🟢 Бот запущен и ожидает команд...")
+    logger.info("🟢🟢🟢 Запускаю бота...")
     application.run_polling()
 
 if __name__ == "__main__":
