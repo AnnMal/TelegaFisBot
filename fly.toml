@@ -1,4 +1,4 @@
-app = "telegafisbot"  # Замените на имя вашего проекта в Fly.io
+app = "AnnMal/TelegaFisBot"  # Замените на имя вашего проекта в Fly.io
 
 [build]
   builder = "paketobuildpacks/builder:base"
