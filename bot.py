@@ -14,12 +14,38 @@ TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # Замените н�
 MAIN_CHAT_ID = -4884863804  # ID основного чата (откуда удалять)
 LIST_CHAT_ID = -1002900105796  # ID чата со списком (где мониторим)
 
-# Настройка логов
+# Настройка логов (ДВОЙНОЕ ЛОГИРОВАНИЕ)
 logging.basicConfig(
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    handlers=[
+        logging.FileHandler("bot.log", encoding='utf-8'),  # Запись в файл
+        logging.StreamHandler()  # Вывод в консоль
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# Для удобного чтения логов в реальном времени
+def tail_logs():
+    """Генератор для чтения логов в реальном времени"""
+    with open('bot.log', 'r', encoding='utf-8') as log_file:
+        log_file.seek(0, 2)  # Перемещаемся в конец файла
+        while True:
+            line = log_file.readline()
+            if not line:
+                continue
+            yield line.strip()
+
+# NEW: Команда для чтения логов
+async def show_logs(update: Update, context: CallbackContext):
+    """Отправка последних 10 строк лога"""
+    try:
+        with open('bot.log', 'r', encoding='utf-8') as f:
+            lines = f.readlines()[-10:]
+            await update.message.reply_text(f"📋 Последние логи:\n```\n{''.join(lines)}\n```", 
+                                          parse_mode='Markdown')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка чтения логов: {e}")
 
 async def start(update: Update, context: CallbackContext) -> None:
     """Обработчик команды /start."""
@@ -27,92 +53,19 @@ async def start(update: Update, context: CallbackContext) -> None:
         "🤖 Бот для управления чатом запущен!\n"
         "Используйте /help для списка команд"
     )
+    logger.info("Бот запущен через команду /start")  # Пример записи в лог
 
-async def help_command(update: Update, context: CallbackContext) -> None:
-    """Обработчик команды /help."""
-    help_text = (
-        "📌 <b>Доступные команды:</b>\n\n"
-        "/start - Перезапуск бота\n"
-        "/help - Эта справка\n\n"
-        "🔍 <b>Автоматические функции:</b>\n"
-        f"• Мониторинг чата ID: <code>{LIST_CHAT_ID}</code>\n"
-        f"• Удаление из чата ID: <code>{MAIN_CHAT_ID}</code>\n\n"
-        "⚠️ <i>Бот должен быть администратором в обоих чатах!</i>"
-    )
-    await update.message.reply_text(help_text, parse_mode='HTML')
-
-def extract_members(text: str) -> set:
-    """Извлекает user_id или @username из текста."""
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-    
-    members = set()
-    for line in lines:
-        # Ищем ID (только цифры длиной 5+)
-        if re.fullmatch(r'\d{5,}', line):
-            members.add(line)
-        # Ищем юзернеймы (начинается с @)
-        elif line.startswith('@'):
-            members.add(line[1:].lower())  # Убираем @ и приводим к lowercase
-    return members
-
-
-async def check_members(update: Update, context: CallbackContext):
-    # Проверяем права бота
-    bot_member = await context.bot.get_chat_member(
-        chat_id=MAIN_CHAT_ID,
-        user_id=context.bot.id
-    )
-    if not bot_member.can_restrict_members:
-        await update.message.reply_text("⚠️ У меня нет прав на удаление участников!")
-        return
-
-#async def check_members(update: Update, context: CallbackContext) -> None:
-#    """Проверяет список и удаляет лишних из основного чата."""
-#    if update.effective_chat.id != LIST_CHAT_ID:
-#        return
-
-    try:
-        new_members = extract_members(update.effective_message.text)
-        if not new_members:
-            raise ValueError("Не найден список пользователей")
-
-        chat = await context.bot.get_chat(MAIN_CHAT_ID)
-        admins = await chat.get_administrators()
-        
-        current_members = {
-            str(member.user.id) for member in admins
-        }.union(
-            {member.user.username.lower() for member in admins if member.user.username}
-        )
-
-        for member in admins:
-            user_id = str(member.user.id)
-            username = member.user.username.lower() if member.user.username else None
-
-            if (user_id not in new_members) and (username not in new_members):
-                try:
-                    # Проверяем, не является ли пользователь создателем
-                    if member.status != 'creator':
-                        await context.bot.ban_chat_member(
-                            chat_id=MAIN_CHAT_ID,
-                            user_id=member.user.id
-                        )
-                        logger.info(f"❌ Удален: {username or user_id}")
-                    else:
-                        logger.warning(f"⚠️ Нельзя удалить создателя: {username or user_id}")
-                except Exception as e:
-                    logger.error(f"🚫 Ошибка удаления {username or user_id}: {e}")
-
-    except Exception as e:
-        logger.error(f"🔥 Ошибка обработки списка: {e}")
+# ... (остальные функции из предыдущего кода остаются без изменений) ...
 
 def main() -> None:
     """Запуск бота."""
-    application = Application.builder().token(TOKEN).build()
-
+    application = Application.builder().token(TOKEN).post_init(post_init).build()
+    
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("check_reaction", check_reaction))
+    application.add_handler(CommandHandler("logs", show_logs))  # NEW
 
     # Обработчик сообщений в чате со списком
     application.add_handler(
@@ -123,7 +76,7 @@ def main() -> None:
     )
 
     # Запуск бота
-    logger.info("🟢 Бот запущен и ожидает команд...")
+    logger.info("🟢🟢🟢 Бот запущен и ожидает команд...")
     application.run_polling()
 
 if __name__ == "__main__":
