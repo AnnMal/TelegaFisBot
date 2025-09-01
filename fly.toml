@@ -1,0 +1,13 @@
+app = "telegafisbot"  # Замените на имя вашего проекта в Fly.io
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+
+[env]
+  TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"  # ВАШ_ТОКЕН_ТЕЛЕГРАМ_БОТА Можно также установить через fly secrets set TOKEN=xxx
+
+[http_service]
+  internal_port = 8080  # Не нужно менять (если бот не использует вебхуки)
+  force_https = true
+  auto_stop_machines = false  # Чтобы бот не останавливался
+  auto_start_machines = true
