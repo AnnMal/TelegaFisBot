@@ -4,8 +4,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # Настройки
 TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"
-MAIN_CHAT_ID = -4884863804  # Чат, откуда будем удалять
-LIST_CHAT_ID = -1002900105796  # Чат с актуальными участниками
+MAIN_CHAT_ID = -4884863804    # Чат для очистки
+LIST_CHAT_ID = -1002900105796 # Чат, где публикуются списки
 
 # Настройка логов
 logging.basicConfig(
@@ -14,98 +14,61 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def handle_list(update: Update, context: CallbackContext):
-    """Обработка сообщения со списком участников и удаление лишних"""
+async def handle_list_message(update: Update, context: CallbackContext):
+    """Обработчик сообщений со списком участников"""
     try:
-        # Проверяем, что сообщение из нужного чата
-        if update.effective_chat.id != LIST_CHAT_ID:
-            return
-
-        text = update.message.text
+        logger.info(f"Получено сообщение: {update.message.text[:100]}...")
         
-        # Проверяем формат сообщения
-        if not text.startswith("Актуальные участники:"):
-            await update.message.reply_text("❌ Неверный формат. Начните сообщение с 'Актуальные участники:'")
+        if not update.message.text.startswith("Актуальные участники:"):
+            await update.message.reply_text("ℹ️ Формат: 'Актуальные участники:' затем список")
             return
-
-        # Получаем список актуальных участников
-        lines = text.split('\n')
-        actual_members = set()
-        
-        for line in lines[1:]:  # Пропускаем первую строку
-            line = line.strip()
-            if line:  # Если строка не пустая
-                actual_members.add(line.lower())  # Приводим к нижнему регистру
-
-        # Получаем текущих администраторов основного чата
-        chat_members = await context.bot.get_chat_administrators(MAIN_CHAT_ID)
-        removed = []
-        errors = []
-
-        for member in chat_members:
-            # Пропускаем создателя чата и самого бота
-            if member.status == 'creator' or member.user.is_bot:
-                continue
-
-            # Формируем идентификаторы пользователя для проверки
-            user_identifiers = [str(member.user.id)]
-            if member.user.username:
-                user_identifiers.append(f"@{member.user.username.lower()}")
             
-            # Проверяем, есть ли пользователь в актуальном списке
-            if not any(ident in actual_members for ident in user_identifiers):
-                try:
-                    await context.bot.ban_chat_member(
-                        chat_id=MAIN_CHAT_ID,
-                        user_id=member.user.id
-                    )
-                    username = f"@{member.user.username}" if member.user.username else str(member.user.id)
-                    removed.append(username)
-                    logger.info(f"Удалён участник: {username}")
-                except Exception as e:
-                    errors.append(str(member.user.id))
-                    logger.error(f"Ошибка удаления {member.user.id}: {e}")
-
-        # Формируем отчёт
-        report = []
-        if removed:
-            report.append(f"✅ Удалено: {len(removed)}")
-            report.append(", ".join(removed))
-        else:
-            report.append("🤷 Нет пользователей для удаления")
+        # Извлекаем участников из списка
+        members = [line.strip().lower() for line in update.message.text.split('\n')[1:] if line.strip()]
+        await update.message.reply_text(f"✅ Получен список из {len(members)} участников")
         
-        if errors:
-            report.append(f"❌ Ошибок: {len(errors)}")
-
-        await update.message.reply_text("\n".join(report))
+        # Здесь будет логика удаления (можно добавить позже)
 
     except Exception as e:
-        logger.error(f"Ошибка: {e}", exc_info=True)
-        await update.message.reply_text("⚠️ Произошла ошибка при обработке")
+        logger.error(f"Ошибка: {e}")
+        await update.message.reply_text("⚠️ Ошибка обработки")
+
+async def show_members(update: Update, context: CallbackContext):
+    """Новая команда /members - показывает текущих администраторов"""
+    try:
+        admins = await update.effective_chat.get_administrators()
+        admin_list = []
+        
+        for admin in admins:
+            user = admin.user
+            admin_info = f"👤 {user.full_name}"
+            if user.username:
+                admin_info += f" (@{user.username})"
+            admin_info += f" [ID: {user.id}]"
+            if admin.status == 'creator':
+                admin_info += " - создатель"
+            admin_list.append(admin_info)
+        
+        response = "📋 Текущие администраторы:\n\n" + "\n".join(admin_list)
+        await update.message.reply_text(response)
+        
+    except Exception as e:
+        logger.error(f"Ошибка команды /members: {e}")
+        await update.message.reply_text("⚠️ Не удалось получить список администраторов")
 
 async def start(update: Update, context: CallbackContext):
-    """Обработка команды /start"""
-    await update.message.reply_text(
-        "🤖 Бот для управления участниками чата\n"
-        "Отправьте список в формате:\n\n"
+    """Обработчик команды /start"""
+    help_text = (
+        "🤖 Бот для управления участниками чата\n\n"
+        "Доступные команды:\n"
+        "/start - показать это сообщение\n"
+        "/members - список администраторов\n\n"
+        "Отправьте список участников в формате:\n"
         "Актуальные участники:\n"
         "@username1\n"
-        "123456789\n"
-        "@username2"
+        "123456789"
     )
-
-async def check_rights(update: Update, context: CallbackContext):
-    """Проверка прав бота в целевом чате"""
-    try:
-        chat = await context.bot.get_chat(MAIN_CHAT_ID)
-        bot_member = await chat.get_member(context.bot.id)
-        
-        if bot_member.can_restrict_members:
-            await update.message.reply_text("🛡️ Бот имеет права на удаление участников")
-        else:
-            await update.message.reply_text("⛔ Бот НЕ имеет прав на удаление участников!")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Ошибка проверки прав: {e}")
+    await update.message.reply_text(help_text)
 
 def main():
     """Запуск бота"""
@@ -113,14 +76,23 @@ def main():
     
     # Обработчики команд
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("rights", check_rights))
+    app.add_handler(CommandHandler("members", show_members))
     
-    # Основной обработчик сообщений
+    # Обработчик списков участников
     app.add_handler(
         MessageHandler(
-            filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT,
-            handle_list
+            filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT & ~filters.COMMAND,
+            handle_list_message
         )
+    )
+    
+    # Логирование всех входящих сообщений
+    app.add_handler(
+        MessageHandler(
+            filters.ALL, 
+            lambda u,c: logger.info(f"Входящее сообщение в чате {u.effective_chat.id}: {u.message.text if u.message else 'NO TEXT'}")
+        ),
+        group=-1
     )
     
     logger.info("Бот запущен и готов к работе...")
