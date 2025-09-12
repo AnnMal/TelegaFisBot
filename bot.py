@@ -1,11 +1,11 @@
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Настройки
 TOKEN = "8285946823:AAE6mT6BtJsOkTQFsP-IrBHonhtaUaJAg8g"
 MAIN_CHAT_ID = -4884863804    # Чат для очистки
-LIST_CHAT_ID = -1002900105796 # Чат, где публикуются списки
+LIST_CHAT_ID = -1002900105796 # Чат для команд
 
 # Настройка логов
 logging.basicConfig(
@@ -14,61 +14,112 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def handle_list_message(update: Update, context: CallbackContext):
-    """Обработчик сообщений со списком участников"""
+current_members = set()  # Храним текущий список участников
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Глобальный обработчик ошибок"""
+    logger.error("Ошибка в обработчике", exc_info=context.error)
+    if isinstance(update, Update):
+        await update.message.reply_text("⚠️ Произошла ошибка. Попробуйте позже.")
+
+async def set_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установка списка участников через команду"""
     try:
-        logger.info(f"Получено сообщение: {update.message.text[:100]}...")
+        global current_members
         
-        if not update.message.text.startswith("Актуальные участники:"):
-            await update.message.reply_text("ℹ️ Формат: 'Актуальные участники:' затем список")
+        # Проверка чата
+        if update.message.chat.id != LIST_CHAT_ID:
+            await update.message.reply_text("❌ Команда доступна только в специальном чате")
             return
             
-        # Извлекаем участников из списка
-        members = [line.strip().lower() for line in update.message.text.split('\n')[1:] if line.strip()]
-        await update.message.reply_text(f"✅ Получен список из {len(members)} участников")
+        # Проверка аргументов
+        if not context.args:
+            await update.message.reply_text(
+                "ℹ️ Использование команды:\n\n"
+                "/setmembers user1 user2 user3\n\n"
+                "Где user может быть:\n"
+                "- @username (например @john)\n"
+                "- user_id (например 123456789)\n\n"
+                "Пример:\n"
+                "/setmembers @john 123456789 @alice"
+            )
+            return
+            
+        # Обработка списка
+        new_members = set()
+        invalid_members = []
         
-        # Здесь будет логика удаления (можно добавить позже)
-
+        for arg in context.args:
+            arg = arg.strip().lower()
+            
+            # Обработка username (@username)
+            if arg.startswith('@'):
+                username = arg[1:]
+                if len(username) >= 5 and username.replace('_', '').isalnum():
+                    new_members.add(f"@{username}")
+                else:
+                    invalid_members.append(arg)
+            
+            # Обработка user_id (цифры)
+            elif arg.isdigit() and len(arg) >= 5:
+                new_members.add(arg)
+            
+            else:
+                invalid_members.append(arg)
+        
+        # Сохраняем новый список
+        current_members = new_members
+        
+        # Формируем отчет
+        response = [
+            f"✅ Установлен новый список ({len(current_members)} участников):"
+        ]
+        
+        # Добавляем username с @ и ID без изменений
+        response.extend(sorted(f"• {m}" for m in current_members))
+        
+        if invalid_members:
+            response.append("\n❌ Некорректные значения:")
+            response.extend(f"× {m}" for m in invalid_members)
+        
+        await update.message.reply_text("\n".join(response))
+        
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        await update.message.reply_text("⚠️ Ошибка обработки")
+        logger.error(f"Ошибка в set_members: {e}")
+        await update.message.reply_text("❌ Ошибка обработки списка")
 
-async def show_members(update: Update, context: CallbackContext):
-    """Новая команда /members - показывает текущих администраторов"""
-    try:
-        admins = await update.effective_chat.get_administrators()
-        admin_list = []
-        
-        for admin in admins:
-            user = admin.user
-            admin_info = f"👤 {user.full_name}"
-            if user.username:
-                admin_info += f" (@{user.username})"
-            admin_info += f" [ID: {user.id}]"
-            if admin.status == 'creator':
-                admin_info += " - создатель"
-            admin_list.append(admin_info)
-        
-        response = "📋 Текущие администраторы:\n\n" + "\n".join(admin_list)
-        await update.message.reply_text(response)
-        
-    except Exception as e:
-        logger.error(f"Ошибка команды /members: {e}")
-        await update.message.reply_text("⚠️ Не удалось получить список администраторов")
-
-async def start(update: Update, context: CallbackContext):
-    """Обработчик команды /start"""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /start"""
     help_text = (
-        "🤖 Бот для управления участниками чата\n\n"
-        "Доступные команды:\n"
+        "🤖 Бот управления участниками чатов\n\n"
+        "🔹 Основные команды:\n"
         "/start - показать это сообщение\n"
-        "/members - список администраторов\n\n"
-        "Отправьте список участников в формате:\n"
-        "Актуальные участники:\n"
-        "@username1\n"
-        "123456789"
+        "/setmembers - задать список участников\n"
+        "/showmembers - показать текущий список\n\n"
+        "📝 Формат списка:\n"
+        "/setmembers @username1 @username2 123456789\n\n"
+        "⚠️ Все команды работают только в специальном чате"
     )
     await update.message.reply_text(help_text)
+
+async def show_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать текущий список участников"""
+    try:
+        if not current_members:
+            await update.message.reply_text("📭 Список участников пуст")
+            return
+            
+        response = [
+            "📋 Текущий список участников:",
+            *sorted(f"• {m}" for m in current_members),
+            f"\nВсего: {len(current_members)}"
+        ]
+        
+        await update.message.reply_text("\n".join(response))
+        
+    except Exception as e:
+        logger.error(f"Ошибка в show_members: {e}")
+        await update.message.reply_text("❌ Ошибка отображения списка")
 
 def main():
     """Запуск бота"""
@@ -76,26 +127,13 @@ def main():
     
     # Обработчики команд
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("members", show_members))
+    app.add_handler(CommandHandler("setmembers", set_members))
+    app.add_handler(CommandHandler("showmembers", show_members))
     
-    # Обработчик списков участников
-    app.add_handler(
-        MessageHandler(
-            filters.Chat(chat_id=LIST_CHAT_ID) & filters.TEXT & ~filters.COMMAND,
-            handle_list_message
-        )
-    )
+    # Обработчик ошибок
+    app.add_error_handler(error_handler)
     
-    # Логирование всех входящих сообщений
-    app.add_handler(
-        MessageHandler(
-            filters.ALL, 
-            lambda u,c: logger.info(f"Входящее сообщение в чате {u.effective_chat.id}: {u.message.text if u.message else 'NO TEXT'}")
-        ),
-        group=-1
-    )
-    
-    logger.info("Бот запущен и готов к работе...")
+    logger.info("Бот успешно запущен")
     app.run_polling()
 
 if __name__ == "__main__":
