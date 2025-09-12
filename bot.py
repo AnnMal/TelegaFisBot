@@ -247,7 +247,8 @@ def main() -> None:
 
         # Обработчик сообщений
         application.add_handler(MessageHandler(
-            filters.Chat(LIST_CHAT_ID) & filters.TEXT & ~filters.COMMAND,
+            filters.Chat(chat_id=LIST_CHAT_ID) & (filters.TEXT | filters.CAPTION),
+# filters.Chat(LIST_CHAT_ID) & filters.TEXT & ~filters.COMMAND,
             check_members
         ), group=1)
 
